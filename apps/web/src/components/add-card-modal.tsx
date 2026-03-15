@@ -269,10 +269,12 @@ export function AddCardModal({ open, onClose, onAdded }: AddCardModalProps) {
 
     try {
       // Cherche par nom OU numéro de carte
+      // Note: pas de guillemets autour des wildcards (syntaxe Lucene pokemontcg.io)
+      // supertype:Pokémon filtre les cartes Dresseur/Énergie qui faussent les résultats
       const isNumber = /^\d+/.test(englishQuery);
       const q = isNumber
         ? `number:${englishQuery}*`
-        : `name:"*${englishQuery}*"`;
+        : `name:*${englishQuery}* supertype:Pokémon`;
 
       const res = await fetch(
         `/api/tcg/search?q=${encodeURIComponent(q)}&pageSize=20&orderBy=-set.releaseDate`
