@@ -67,36 +67,30 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "cardId requis" }, { status: 400 });
   }
 
+  const apiKey = process.env.POKEMONTCG_API_KEY;
   let fetchError: string | null = null;
 
+  // ── Source 1 : pokemontcg.io (données Cardmarket EUR) ──────────────────────
   try {
     const tcgRes = await fetch(
       `https://api.pokemontcg.io/v2/cards/${encodeURIComponent(cardId)}`,
       {
-        headers: process.env.POKEMONTCG_API_KEY
-          ? { "X-Api-Key": process.env.POKEMONTCG_API_KEY }
-          : {},
+        headers: apiKey ? { "X-Api-Key": apiKey } : {},
         cache: "no-store",
       }
     );
 
     if (!tcgRes.ok) {
       fetchError = `pokemontcg.io HTTP ${tcgRes.status}`;
-      console.error(`[cardmarket/price] ${fetchError} for ${cardId}`);
     } else {
       const { data } = await tcgRes.json();
       const cmPrices = data?.cardmarket?.prices;
-
-      if (!cmPrices) {
-        fetchError = "no cardmarket prices in response";
-      } else {
+      if (cmPrices) {
         const price = extractCardmarketPrice(cmPrices, condition, language);
         return NextResponse.json({
           price,
           baseNMPrice: +(cmPrices.trendPrice ?? cmPrices.averageSellPrice ?? 0).toFixed(2),
-          condition,
-          language,
-          currency: "EUR",
+          condition, language, currency: "EUR",
           source: "cardmarket_live",
           updatedAt: new Date().toISOString(),
           cardmarketRaw: {
@@ -104,16 +98,61 @@ export async function GET(request: NextRequest) {
             trendPrice: cmPrices.trendPrice,
             lowPrice: cmPrices.lowPrice,
             lowPriceExPlus: cmPrices.lowPriceExPlus,
-            avg1: cmPrices.avg1,
-            avg7: cmPrices.avg7,
-            avg30: cmPrices.avg30,
+            avg1: cmPrices.avg1, avg7: cmPrices.avg7, avg30: cmPrices.avg30,
           },
         });
       }
+      fetchError = "no cardmarket prices in pokemontcg.io response";
     }
   } catch (err: any) {
-    fetchError = err?.message ?? "unknown fetch error";
-    console.error("[cardmarket/price] fetch failed:", fetchError);
+    fetchError = err?.message ?? "pokemontcg.io fetch error";
+  }
+
+  // ── Source 2 : Scrydex (USD → EUR ~0.92, TCGPlayer) ───────────────────────
+  if (apiKey) {
+    try {
+      const scrydexRes = await fetch(
+        `https://api.scrydex.com/pokemon/v1/cards/${encodeURIComponent(cardId)}?include=prices`,
+        {
+          headers: {
+            "X-Api-Key": apiKey,
+            ...(process.env.SCRYDEX_TEAM_ID ? { "X-Team-ID": process.env.SCRYDEX_TEAM_ID } : {}),
+          },
+          cache: "no-store",
+        }
+      );
+
+      if (scrydexRes.ok) {
+        const scrydexData = await scrydexRes.json();
+        // Scrydex retourne prices[] avec condition NM/LP/MP/HP/DM en USD
+        const prices: Array<{ condition: string; type: string; market: number; low: number; currency: string }> =
+          scrydexData?.prices ?? scrydexData?.data?.prices ?? [];
+
+        // Mapper condition RareSignal → Scrydex
+        const condMap: Record<string, string> = { NM: "NM", EX: "LP", LP: "MP", PO: "HP" };
+        const targetCond = condMap[condition] ?? "NM";
+        const rawPrice = prices.find(
+          (p) => p.type === "raw" && p.condition === targetCond && p.currency === "USD"
+        );
+
+        if (rawPrice?.market) {
+          const USD_TO_EUR = 0.92;
+          const langMult = LANGUAGE_MULTIPLIERS[language] ?? 1.0;
+          const price = +(rawPrice.market * USD_TO_EUR * langMult).toFixed(2);
+          return NextResponse.json({
+            price,
+            baseNMPrice: +(rawPrice.market * USD_TO_EUR).toFixed(2),
+            condition, language, currency: "EUR",
+            source: "scrydex_usd",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        fetchError = `${fetchError ?? ""} | Scrydex HTTP ${scrydexRes.status}`;
+      }
+    } catch (err: any) {
+      fetchError = `${fetchError ?? ""} | Scrydex: ${err?.message}`;
+    }
   }
 
   // Fallback : cache local (prix Cardmarket NM de référence)
