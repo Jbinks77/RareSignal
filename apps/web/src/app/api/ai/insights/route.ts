@@ -5,6 +5,8 @@ import { getMarketInsights } from "@/lib/ai/claude";
 import { mockCards } from "@/lib/mock-data";
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const topCards = [...mockCards]
