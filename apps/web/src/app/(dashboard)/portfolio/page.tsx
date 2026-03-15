@@ -102,80 +102,61 @@ export default function PortfolioPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [manualPriceId, setManualPriceId] = useState<string | null>(null);
+  const [manualPriceValue, setManualPriceValue] = useState<string>("");
 
-  // Récupère les vrais prix Cardmarket depuis pokemontcg.io
+  // Récupère les prix via le proxy serveur (pokemontcg.io + Scrydex + local cache)
   const fetchLivePrices = useCallback(async () => {
     if (entries.length === 0 || refreshing) return;
     setRefreshing(true);
     setRefreshError(null);
 
     let liveCount = 0;
-    let localCount = 0;
+    let fallbackCount = 0;
+    let noDataCount = 0;
 
-    await Promise.allSettled(
-      entries.map(async (entry) => {
-        // Stratégie 1 : appel DIRECT depuis le navigateur à pokemontcg.io
-        // (le navigateur n'a pas les restrictions réseau du serveur Node.js)
-        try {
-          const res = await fetch(
-            `https://api.pokemontcg.io/v2/cards/${encodeURIComponent(entry.card.apiId)}`,
-            { headers: { Accept: "application/json" } }
-          );
-          if (res.ok) {
-            const { data } = await res.json();
-            const cmPrices = data?.cardmarket?.prices;
-            if (cmPrices) {
-              const price = extractCardmarketPrice(cmPrices, entry.condition, entry.card.language);
-              if (price !== null) {
-                updateLivePrice(entry.id, price);
-                liveCount++;
-                return;
-              }
-            }
-          }
-        } catch {
-          // pokemontcg.io inaccessible depuis le navigateur, essayer le proxy serveur
-        }
+    for (const entry of entries) {
+      if (!entry.card.apiId) { noDataCount++; continue; }
 
-        // Stratégie 2 : via le proxy Next.js (/api/cardmarket/price)
-        // (fonctionne en production sur Vercel où le réseau n'est pas limité)
-        try {
-          const params = new URLSearchParams({
-            cardId: entry.card.apiId,
-            condition: entry.condition,
-            language: entry.card.language,
-          });
-          const res = await fetch(`/api/cardmarket/price?${params}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.price !== null && data.price !== undefined) {
-              updateLivePrice(entry.id, data.price);
+      try {
+        const params = new URLSearchParams({
+          cardId: entry.card.apiId,
+          condition: entry.condition,
+          language: entry.card.language ?? "fr",
+        });
+        const res = await fetch(`/api/cardmarket/price?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.price != null) {
+            updateLivePrice(entry.id, data.price);
+            if (data.source === "cardmarket_live" || data.source === "scrydex_usd") {
               liveCount++;
-              return;
+            } else {
+              fallbackCount++;
             }
+            continue;
           }
-        } catch {
-          // proxy aussi bloqué
         }
+      } catch { /* réseau indisponible */ }
 
-        // Stratégie 3 : calcul local depuis le prix de référence stocké lors de l'ajout
-        const local = computeLocalPrice(entry);
-        if (local !== null) {
-          updateLivePrice(entry.id, local);
-          localCount++;
-        }
-      })
-    );
+      // Fallback local : prix stocké à l'ajout
+      const local = computeLocalPrice(entry);
+      if (local !== null) {
+        updateLivePrice(entry.id, local);
+        fallbackCount++;
+      } else {
+        noDataCount++;
+      }
+    }
 
-    if (liveCount === 0 && localCount === 0) {
-      setRefreshError("Aucune donnée de prix disponible. Ajoutez vos cartes via la recherche pour obtenir les prix Cardmarket.");
+    if (liveCount === 0 && fallbackCount === 0) {
+      setRefreshError("Aucune donnée de prix disponible. Les cartes très récentes ou introuvables n'ont pas encore de données Cardmarket.");
     } else if (liveCount > 0) {
       setRefreshError(null);
-      setLastRefresh(new Date());
     } else {
-      setRefreshError(`Prix Cardmarket indisponibles (réseau) — ${localCount} carte${localCount > 1 ? "s" : ""} calculée${localCount > 1 ? "s" : ""} depuis vos données de référence.`);
-      setLastRefresh(new Date());
+      setRefreshError(`Prix estimés depuis vos données de référence — Cardmarket indisponible pour ces cartes.`);
     }
+    setLastRefresh(new Date());
     setRefreshing(false);
   }, [entries, refreshing, updateLivePrice]);
 
@@ -461,8 +442,35 @@ export default function PortfolioPage() {
                             )}
                           </p>
                         </>
+                      ) : manualPriceId === entry.id ? (
+                        <div className="flex items-center gap-1 justify-end">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            autoFocus
+                            placeholder="0.00"
+                            value={manualPriceValue}
+                            onChange={(e) => setManualPriceValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const p = parseFloat(manualPriceValue);
+                                if (!isNaN(p) && p > 0) { updateLivePrice(entry.id, p); }
+                                setManualPriceId(null);
+                              }
+                              if (e.key === "Escape") setManualPriceId(null);
+                            }}
+                            className="w-20 text-right px-2 py-1 bg-white/5 border border-gold/30 rounded-lg text-xs text-white focus:outline-none"
+                          />
+                          <span className="text-white/30 text-xs">€</span>
+                        </div>
                       ) : (
-                        <span className="text-xs text-white/20">— non dispo</span>
+                        <button
+                          onClick={() => { setManualPriceId(entry.id); setManualPriceValue(""); }}
+                          className="text-[10px] text-white/30 hover:text-gold/60 border border-white/10 hover:border-gold/20 rounded-lg px-2 py-1 transition-all"
+                        >
+                          + Prix manuel
+                        </button>
                       )}
                     </td>
 
