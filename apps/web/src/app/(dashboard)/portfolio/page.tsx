@@ -104,19 +104,26 @@ export default function PortfolioPage() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [manualPriceId, setManualPriceId] = useState<string | null>(null);
   const [manualPriceValue, setManualPriceValue] = useState<string>("");
+  const [priceErrors, setPriceErrors] = useState<Record<string, string>>({});
 
   // Récupère les prix via le proxy serveur (pokemontcg.io + Scrydex + local cache)
   const fetchLivePrices = useCallback(async () => {
     if (entries.length === 0 || refreshing) return;
     setRefreshing(true);
     setRefreshError(null);
+    setPriceErrors({});
 
     let liveCount = 0;
     let fallbackCount = 0;
     let noDataCount = 0;
+    const newPriceErrors: Record<string, string> = {};
 
     for (const entry of entries) {
-      if (!entry.card.apiId) { noDataCount++; continue; }
+      if (!entry.card.apiId) {
+        newPriceErrors[entry.id] = `Pas d'ID API (carte ajoutée manuellement)`;
+        noDataCount++;
+        continue;
+      }
 
       try {
         const params = new URLSearchParams({
@@ -136,8 +143,14 @@ export default function PortfolioPage() {
             }
             continue;
           }
+          // Prix null : stocker la raison
+          newPriceErrors[entry.id] = `ID: ${entry.card.apiId} — ${data.fetchError ?? data.source ?? "pas de données Cardmarket"}`;
+        } else {
+          newPriceErrors[entry.id] = `ID: ${entry.card.apiId} — HTTP ${res.status}`;
         }
-      } catch { /* réseau indisponible */ }
+      } catch (e: any) {
+        newPriceErrors[entry.id] = `ID: ${entry.card.apiId} — réseau: ${e?.message ?? "erreur"}`;
+      }
 
       // Fallback local : prix stocké à l'ajout
       const local = computeLocalPrice(entry);
@@ -148,6 +161,8 @@ export default function PortfolioPage() {
         noDataCount++;
       }
     }
+
+    setPriceErrors(newPriceErrors);
 
     if (liveCount === 0 && fallbackCount === 0) {
       setRefreshError("Aucune donnée de prix disponible. Les cartes très récentes ou introuvables n'ont pas encore de données Cardmarket.");
@@ -465,12 +480,19 @@ export default function PortfolioPage() {
                           <span className="text-white/30 text-xs">€</span>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => { setManualPriceId(entry.id); setManualPriceValue(""); }}
-                          className="text-[10px] text-white/30 hover:text-gold/60 border border-white/10 hover:border-gold/20 rounded-lg px-2 py-1 transition-all"
-                        >
-                          + Prix manuel
-                        </button>
+                        <>
+                          <button
+                            onClick={() => { setManualPriceId(entry.id); setManualPriceValue(""); }}
+                            className="text-[10px] text-white/30 hover:text-gold/60 border border-white/10 hover:border-gold/20 rounded-lg px-2 py-1 transition-all"
+                          >
+                            + Prix manuel
+                          </button>
+                          {priceErrors[entry.id] && (
+                            <p className="text-[8px] text-red-400/50 mt-0.5 max-w-[120px] text-right leading-tight" title={priceErrors[entry.id]}>
+                              ⚠ {priceErrors[entry.id].substring(0, 40)}{priceErrors[entry.id].length > 40 ? "…" : ""}
+                            </p>
+                          )}
+                        </>
                       )}
                     </td>
 
