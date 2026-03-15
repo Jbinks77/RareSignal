@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "3005"],
+      "port": 3005,
+      "autoPort": false,
+      "cwd": "C:/Users/botpo/Projects/raresignal/apps/web"
+    }
+  ]
+}
