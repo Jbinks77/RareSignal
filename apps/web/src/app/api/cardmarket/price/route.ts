@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LOCAL_PRICE_CACHE } from "@/lib/price-seed";
 
+export const dynamic = "force-dynamic";
+
 // Multiplicateurs de langue (les prix pokemontcg.io sont agrégés toutes langues)
 const LANGUAGE_MULTIPLIERS: Record<string, number> = {
   fr: 0.95, en: 1.00, de: 0.98, es: 0.92, it: 0.90, pt: 0.88, jp: 0.75, kr: 0.70,
@@ -65,6 +67,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "cardId requis" }, { status: 400 });
   }
 
+  let fetchError: string | null = null;
+
   try {
     const tcgRes = await fetch(
       `https://api.pokemontcg.io/v2/cards/${encodeURIComponent(cardId)}`,
@@ -76,22 +80,25 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    if (tcgRes.ok) {
+    if (!tcgRes.ok) {
+      fetchError = `pokemontcg.io HTTP ${tcgRes.status}`;
+      console.error(`[cardmarket/price] ${fetchError} for ${cardId}`);
+    } else {
       const { data } = await tcgRes.json();
       const cmPrices = data?.cardmarket?.prices;
 
-      if (cmPrices) {
+      if (!cmPrices) {
+        fetchError = "no cardmarket prices in response";
+      } else {
         const price = extractCardmarketPrice(cmPrices, condition, language);
-
         return NextResponse.json({
           price,
-          baseNMPrice: +(cmPrices.averageSellPrice ?? cmPrices.trendPrice ?? 0).toFixed(2),
+          baseNMPrice: +(cmPrices.trendPrice ?? cmPrices.averageSellPrice ?? 0).toFixed(2),
           condition,
           language,
           currency: "EUR",
           source: "cardmarket_live",
           updatedAt: new Date().toISOString(),
-          // Données brutes Cardmarket pour debug/transparence
           cardmarketRaw: {
             averageSellPrice: cmPrices.averageSellPrice,
             trendPrice: cmPrices.trendPrice,
@@ -104,8 +111,9 @@ export async function GET(request: NextRequest) {
         });
       }
     }
-  } catch (err) {
-    console.error("[cardmarket/price] pokemontcg.io inaccessible:", err);
+  } catch (err: any) {
+    fetchError = err?.message ?? "unknown fetch error";
+    console.error("[cardmarket/price] fetch failed:", fetchError);
   }
 
   // Fallback : cache local (prix Cardmarket NM de référence)
@@ -131,6 +139,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     price: null,
     source: "unavailable",
+    fetchError,
     condition,
     language,
     updatedAt: new Date().toISOString(),
