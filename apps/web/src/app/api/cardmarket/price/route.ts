@@ -21,15 +21,15 @@ function extractCardmarketPrice(
   const lowExPlus = cmPrices.lowPriceExPlus;  // Annonce la moins chère EX ou mieux
   const avg30 = cmPrices.avg30;               // Moyenne 30 jours
 
-  // Référence NM — trendPrice est le prix Cardmarket spécifique aux cartes NM
-  // averageSellPrice mélange toutes conditions donc on l'utilise en dernier recours
+  // Base pour calculs de conditions (trendPrice = référence marché NM)
   const nmBase = trend ?? avg ?? avg30;
   if (!nmBase) return null;
 
   let condPrice: number;
 
   if (condition === "NM") {
-    condPrice = nmBase;
+    // lowPriceExPlus = moins chère annonce EX ou mieux = proxy "moins cher NM"
+    condPrice = lowExPlus && lowExPlus > 0 ? lowExPlus : nmBase;
 
   } else if (condition === "EX") {
     if (lowExPlus && lowExPlus > 0) {

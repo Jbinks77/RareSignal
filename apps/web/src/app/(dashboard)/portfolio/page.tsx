@@ -52,8 +52,8 @@ function extractCardmarketPrice(
   let condPrice: number;
 
   if (condition === "NM") {
-    // averageSellPrice = prix moyen réel des ventes NM sur Cardmarket
-    condPrice = nmBase;
+    // lowPriceExPlus = moins chère annonce EX ou mieux = proxy "moins cher NM"
+    condPrice = lowExPlus && lowExPlus > 0 ? lowExPlus : nmBase;
 
   } else if (condition === "EX") {
     // lowPriceExPlus = vrai prix minimum annonce EX ou mieux sur Cardmarket
